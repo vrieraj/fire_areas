@@ -44,13 +44,13 @@ def fire_areas(bbox:tuple, date_str:str, shapefile_path:str):
 
     # 🧠 Process image and get contours
     rgb, transform, crs = load_image(img_bytes)
-    contours = detect_areas(rgb, transform, points=False)
+    contours, adjusted_transform = detect_areas(rgb, transform, points=False)
     if not contours:
         print("⚠️ No contours detected.")
         return
 
     # 🔲 Generated polygons and create GeoDataFrame
-    polygons, areas = calculate_polygon_areas(contours, transform)
+    polygons, areas = calculate_polygon_areas(contours, adjusted_transform)
     if not polygons:
         print("⚠️ No valid polygons generated.")
         return

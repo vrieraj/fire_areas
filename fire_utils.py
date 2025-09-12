@@ -63,18 +63,17 @@ def get_wms_image(wms:str, target_layer:str, bbox:tuple, time:str, size:tuple, e
     return img
 
 def load_image(img_bytes):
-    def load_image(img_bytes):
-        """
-        Load an image from WMS binary data and return its RGB array, affine transform, and CRS.
+    """
+    Load an image from WMS binary data and return its RGB array, affine transform, and CRS.
 
-        Arguments:
-        - img_bytes (bytes): Binary image data returned by a WMS GetMap request (e.g., GeoTIFF format).
+    Arguments:
+    - img_bytes (bytes): Binary image data returned by a WMS GetMap request (e.g., GeoTIFF format).
 
-        Returns:
-        - rgb (np.ndarray): 3D NumPy array representing the RGB image (uint8).
-        - transform (Affine): Affine transformation mapping pixel coordinates to spatial coordinates.
-        - crs (CRS): Coordinate Reference System of the image.
-        """
+    Returns:
+    - rgb (np.ndarray): 3D NumPy array representing the RGB image (uint8).
+    - transform (Affine): Affine transformation mapping pixel coordinates to spatial coordinates.
+    - crs (CRS): Coordinate Reference System of the image.
+    """
     with MemoryFile(img_bytes) as memfile:
         with memfile.open() as dataset:
             r = dataset.read(1)
@@ -87,58 +86,64 @@ def load_image(img_bytes):
 
 ## DETECTION AND CALCULATION OF AREAS OF INTEREST ##
 
-def detect_areas(rgb, transform, points=False):
+def detect_areas(rgb: np.ndarray, transform, points=False, upscale_factor=4, blur_sigma=4.0, threshold_value=0.8):
     """
-    Apply color masking to detect areas of interest (white, yellow, orange) and return either geographic coordinates or contours.
+    Detect areas from an RGB image using HSV color thresholding, with subpixel interpolation via blurring
+    and/or resizing (bicubic interpolation). Returns either contours or geo-referenced points.
 
-    Arguments:
-    - rgb (np.ndarray): RGB image as a 3D NumPy array (uint8), typically obtained from a WMS GeoTIFF.
-    - transform (Affine): Affine transformation used to convert pixel coordinates to geographic coordinates.
-    - points (bool): If True, returns a list of geographic coordinates for detected pixels. 
-                     If False, returns OpenCV contours of the detected areas.
+    Args:
+        rgb (np.ndarray): RGB image (H, W, 3)
+        transform (Affine): Affine transform of original image
+        points (bool): Return list of geocoordinates if True
+        upscale_factor (int): Scaling factor to simulate subpixel resolution
+        blur_sigma (float): Sigma value for Gaussian blur
+        threshold_value (float): Threshold value (0–1) for interpolated mask
 
     Returns:
-    - If points is True:
-        List[Tuple[float, float]]: List of geographic coordinates (longitude, latitude) where color matches were found.
-    - If points is False:
-        List[np.ndarray]: List of contours, where each contour is a NumPy array of pixel coordinates (x, y).
+        If points=True: List of (lon, lat) coordinates
+        If points=False: Tuple (contours, adjusted_transform)
     """
     hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
 
-    # White
-    lower_white = np.array([0, 0, 200])
-    upper_white = np.array([180, 50, 255])
-    mask_white = cv2.inRange(hsv, lower_white, upper_white)
+    # Create color masks
+    mask_white = cv2.inRange(hsv, np.array([0, 0, 200]), np.array([180, 50, 255]))
+    mask_yellow = cv2.inRange(hsv, np.array([20, 100, 100]), np.array([40, 255, 255]))
+    mask_orange = cv2.inRange(hsv, np.array([5, 100, 100]), np.array([25, 255, 255]))
 
-    # Yellow
-    lower_yellow = np.array([20, 100, 100])
-    upper_yellow = np.array([40, 255, 255])
-    mask_yellow = cv2.inRange(hsv, lower_yellow, upper_yellow)
-
-    # Orange
-    lower_orange = np.array([5, 100, 100])
-    upper_orange = np.array([25, 255, 255])
-    mask_orange = cv2.inRange(hsv, lower_orange, upper_orange)
-
-    # Combine all the masks
+    # Combine masks and clean
     mask = cv2.bitwise_or(mask_white, mask_yellow)
     mask = cv2.bitwise_or(mask, mask_orange)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
 
-    kernel = np.ones((3, 3), np.uint8)
-    mask_clean = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+    # Step 1: Convert to float32 and normalize
+    mask_f = mask.astype(np.float32) / 255.0
+
+    # Step 2: Upscale to simulate subpixels
+    if upscale_factor > 1:
+        mask_f = cv2.resize(mask_f, None, fx=upscale_factor, fy=upscale_factor, interpolation=cv2.INTER_CUBIC)
+
+    # Step 3: Apply Gaussian blur to generate soft edges
+    mask_f = cv2.GaussianBlur(mask_f, (0, 0), sigmaX=blur_sigma, sigmaY=blur_sigma)
+
+    # Step 4: Threshold to simulate soft boundary
+    _, mask_thresh = cv2.threshold(mask_f, threshold_value, 1.0, cv2.THRESH_BINARY)
+
+    # Step 5: Convert back to uint8 for contour detection
+    mask_uint8 = (mask_thresh * 255).astype(np.uint8)
 
     if points:
-        # Get coordinates (row, column) from activate pixels
-        ys, xs = np.where(mask_clean > 0)
-
-        # Convert pixels to geographic coordinates
-        geo_coords = [xy(transform, y, x, offset='center') for y, x in zip(ys, xs)]
-
+        ys, xs = np.where(mask_uint8 > 0)
+        adjusted_transform = transform * transform.scale(1 / upscale_factor, 1 / upscale_factor)
+        geo_coords = [xy(adjusted_transform, y, x, offset='center') for y, x in zip(ys, xs)]
         return geo_coords
-    
-    # Get contours
-    contours, _ = cv2.findContours(mask_clean, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    return contours
+
+    # Step 6: Get contours from smooth mask
+    contours, _ = cv2.findContours(mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+
+    # Step 7: Adjust transform for upscaled image
+    adjusted_transform = transform * transform.scale(1 / upscale_factor, 1 / upscale_factor)
+
+    return contours, adjusted_transform
 
 def calculate_polygon_areas(contours, transform, min_area_ha:float=1.0, simplify_tolerance:float=0.001):
     """
