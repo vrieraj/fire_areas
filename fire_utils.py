@@ -1,4 +1,5 @@
 import cv2
+from datetime import timedelta
 import geopandas as gpd
 import pandas as pd
 import numpy as np
@@ -8,9 +9,53 @@ from rasterio.transform import xy
 from shapely.geometry import Polygon
 from shapely.ops import unary_union
 
+def generate_datetimes(start, end, step_minutes):
+    """
+    Genera una lista de fechas a intervalos de 10 minutos entre `start` y `end`.
+    """
+    current = start
+    times = []
+    while current <= end:
+        times.append(current.isoformat() + 'Z')  # Formato ISO con 'Z'
+        current += timedelta(minutes=step_minutes)
+    return times
+
+## BBOX -> GRID ##
+
+def compute_grid_for_bbox(bbox: tuple, pixel_size_m: float = 500.0, base_px: int = 500):
+    lon_min, lat_min, lon_max, lat_max = bbox
+    geod = Geod(ellps="WGS84")
+
+    # dimensiones del bbox en metros
+    _, _, width_m = geod.inv(lon_min, (lat_min+lat_max)/2, lon_max, (lat_min+lat_max)/2)
+    _, _, height_m = geod.inv((lon_min+lon_max)/2, lat_min, (lon_min+lon_max)/2, lat_max)
+
+    sub_width_m = base_px * pixel_size_m
+    sub_height_m = base_px * pixel_size_m
+
+    n_cols = max(1, int(round(width_m / sub_width_m)))
+    n_rows = max(1, int(round(height_m / sub_height_m)))
+
+    return n_rows, n_cols
+
+def split_bbox(bbox, n_rows, n_cols):
+    xmin, ymin, xmax, ymax = bbox
+    dx = (xmax - xmin) / n_cols
+    dy = (ymax - ymin) / n_rows
+
+    sub_boxes = []
+    for i in range(n_rows):
+        for j in range(n_cols):
+            x0 = xmin + j * dx
+            y0 = ymin + i * dy
+            x1 = x0 + dx
+            y1 = y0 + dy
+            sub_boxes.append((x0, y0, x1, y1))
+    return sub_boxes
+
 ## WMS IMAGE DOWNLOAD UTILITIES ##
 
-def calculate_image_size(bbox:tuple, base_size:int=300):
+def calculate_image_size(bbox:tuple, pixel_size_m:float=500.0):
     """
     Calculate the aspect ratio of the image based in bbox.
 
@@ -22,10 +67,18 @@ def calculate_image_size(bbox:tuple, base_size:int=300):
     tuple: (width, height) in pixels.
     """
     lon_min, lat_min, lon_max, lat_max = bbox
-    aspect_ratio = (lon_max - lon_min) / (lat_max - lat_min)
-    width = base_size
-    height = int(base_size / aspect_ratio)
-    return (width, height)
+    geod = Geod(ellps="WGS84")
+
+    _, _, width_m = geod.inv(lon_min, (lat_min+lat_max)/2,
+                             lon_max, (lat_min+lat_max)/2)
+
+    _, _, height_m = geod.inv((lon_min+lon_max)/2, lat_min,
+                              (lon_min+lon_max)/2, lat_max)
+
+    width_px = int(round(width_m / pixel_size_m))
+    height_px = int(round(height_m / pixel_size_m))
+
+    return (width_px, height_px)
 
 def get_wms_image(wms:str, target_layer:str, bbox:tuple, time:str, size:tuple, epsg='EPSG:4326', format='image/geotiff'):
     """
