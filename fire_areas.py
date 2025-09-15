@@ -16,7 +16,7 @@ from fire_utils import (
     update_shapefile
 )
 
-def process_fire_grid(bbox: tuple,start: str,end: str,shapefile_path: str,step_minutes: int = 10,pixel_size_m: float = 500.0,base_px: int = 500):
+def process_fire_grid(bbox: tuple,start: str,end: str,shapefile_path: str, method: str,step_minutes: int = 10,pixel_size_m: float = 500.0,base_px: int = 500):
     """
     Iterate over a large bounding box divided into sub-bboxes and send fire detections to AGOL.
 
@@ -24,7 +24,8 @@ def process_fire_grid(bbox: tuple,start: str,end: str,shapefile_path: str,step_m
         bbox (tuple): (lon_min, lat_min, lon_max, lat_max) of the area of interest.
         start (datetime): start date and time.
         end (datetime): end date and time.
-        layer_url (str): URL of the target FeatureLayer in AGOL.
+        shapefile_path (str):  Path to the output shapefile
+        method (str): 'rgb', 'hsv', or 'combined'.
         step_minutes (int): temporal interval in minutes (default=10).
         pixel_size_m (float): target spatial resolution in meters (default=500m).
         base_px (int): base pixel width/height of each subimage (default=300).
@@ -55,13 +56,13 @@ def process_fire_grid(bbox: tuple,start: str,end: str,shapefile_path: str,step_m
         for j, sbox in enumerate(sub_boxes, start=1):
             print(f"   📍 Sub-bbox {j}/{len(sub_boxes)}: {sbox}")
             try:
-                fire_areas(sbox, time, shapefile_path)
+                fire_areas(sbox, time, shapefile_path, method)
             except Exception as e:
                 print(f"   ❌ Error at {time}, sub-bbox {j}: {e}")
 
     print("\n✅ Processing completed.")
 
-def fire_areas(bbox:tuple, date_str:str, shapefile_path:str):
+def fire_areas(bbox:tuple, date_str:str, shapefile_path:str, method:str):
     """
     🔥 Wildfire monitoring using WMS images from EUMETSAT
 
@@ -76,6 +77,7 @@ def fire_areas(bbox:tuple, date_str:str, shapefile_path:str):
     bbox (tuple):   Bounding box as 4 values: (LON_MIN, LAT_MIN, LON_MAX, LAT_MAX)
     date_str (str):   Date and time in format: 'YYYY-MM-DDTHH:MM:SSZ'
     shapefile_path (str):  Path to the output shapefile
+    method (str): 'rgb', 'hsv', or 'combined'.
     """
     
     # 🌐 Source WMS (not edit)
@@ -92,7 +94,7 @@ def fire_areas(bbox:tuple, date_str:str, shapefile_path:str):
 
     # 🧠 Process image and get contours
     rgb, transform, crs = load_image(img_bytes)
-    contours, adjusted_transform = detect_areas(rgb, transform, points=False)
+    contours, adjusted_transform = detect_areas(rgb, transform, method=method)
     if not contours:
         print("⚠️ No contours detected.")
         return

@@ -139,41 +139,96 @@ def load_image(img_bytes):
 
 ## DETECTION AND CALCULATION OF AREAS OF INTEREST ##
 
-def detect_areas(rgb: np.ndarray, transform, points=False, upscale_factor=4, blur_sigma=4.0, threshold_value=0.8):
+def create_mask_rgb(rgb: np.ndarray, tol: int = 40) -> np.ndarray:
     """
-    Detect areas from an RGB image using HSV color thresholding, with subpixel interpolation via blurring
-    and/or resizing (bicubic interpolation). Returns either contours or geo-referenced points.
+    Create a fire mask based on RGB thresholds from the EUMETSAT Fire Temperature RGB guide.
 
     Args:
-        rgb (np.ndarray): RGB image (H, W, 3)
-        transform (Affine): Affine transform of original image
-        points (bool): Return list of geocoordinates if True
-        upscale_factor (int): Scaling factor to simulate subpixel resolution
-        blur_sigma (float): Sigma value for Gaussian blur
-        threshold_value (float): Threshold value (0–1) for interpolated mask
+        rgb (np.ndarray): RGB image (H, W, 3).
+        tol (int): Tolerance per channel (default=40).
 
     Returns:
-        If points=True: List of (lon, lat) coordinates
-        If points=False: Tuple (contours, adjusted_transform)
+        mask_rgb (np.ndarray): Binary mask (0/255).
+    """
+    fire_colors = {
+        "warm": (254, 40, 40),        # warm fire / hot spot
+        "very_warm": (255, 192, 0),   # very warm fire
+        "hot": (255, 255, 0),         # hot fire
+        "extreme": (255, 255, 255)    # extreme intense fire
+    }
+
+    mask_rgb = np.zeros(rgb.shape[:2], dtype=np.uint8)
+    for ref in fire_colors.values():
+        lower = np.clip(np.array(ref) - tol, 0, 255).astype(np.uint8)
+        upper = np.clip(np.array(ref) + tol, 0, 255).astype(np.uint8)
+        mask_rgb |= cv2.inRange(rgb, lower, upper)
+
+    return mask_rgb
+
+
+def create_mask_hsv(rgb: np.ndarray) -> np.ndarray:
+    """
+    Create a fire mask based on HSV ranges (tone/saturation/value).
+
+    Args:
+        rgb (np.ndarray): RGB image (H, W, 3).
+
+    Returns:
+        mask_hsv (np.ndarray): Binary mask (0/255).
     """
     hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
+    ranges_hsv = [
+        (np.array([0, 120, 150]),  np.array([15, 255, 255])),   # warm fire (red-orange)
+        (np.array([20, 120, 150]), np.array([60, 255, 255])),   # yellow fires
+        (np.array([0, 0, 230]),    np.array([179, 50, 255]))    # extreme (white)
+    ]
 
-    # Create color masks
-    mask_white = cv2.inRange(hsv, np.array([0, 0, 200]), np.array([180, 50, 255]))
-    mask_yellow = cv2.inRange(hsv, np.array([20, 100, 100]), np.array([40, 255, 255]))
-    mask_orange = cv2.inRange(hsv, np.array([5, 100, 100]), np.array([25, 255, 255]))
+    mask_hsv = np.zeros(rgb.shape[:2], dtype=np.uint8)
+    for lower, upper in ranges_hsv:
+        mask_hsv |= cv2.inRange(hsv, lower, upper)
 
-    # Combine masks and clean
-    mask = cv2.bitwise_or(mask_white, mask_yellow)
-    mask = cv2.bitwise_or(mask, mask_orange)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    return mask_hsv
+
+
+def detect_areas(rgb: np.ndarray, transform, method: str = "hsv",
+                 upscale_factor=4, blur_sigma=3.0, threshold_value=0.7, tol: int = 40):
+    """
+    Detect fire areas from an RGB image using RGB, HSV, or combined masks.
+
+    Args:
+        rgb (np.ndarray): RGB image (H, W, 3).
+        transform (Affine): Affine transform of the original image.
+        method (str): 'rgb', 'hsv' (default), or 'combined'.
+        upscale_factor (int): Scaling factor to simulate subpixel resolution (default=4).
+        blur_sigma (float): Sigma value for Gaussian blur (default=3.0).
+        threshold_value (float): Threshold value (0–1) for the blurred mask (default=0.7).
+        tol (int): RGB tolerance (default=40, only for method='rgb' or 'combined').
+
+    Returns:
+        contours (List[np.ndarray]): OpenCV contours [(N,1,2)] in geographic coordinates.
+        adjusted_transform (Affine): Transform adjusted for upscaling.
+    """
+    # --- Choose mask type ---
+    if method == "rgb":
+        mask_total = create_mask_rgb(rgb, tol=tol)
+    elif method == "hsv":
+        mask_total = create_mask_hsv(rgb)
+    elif method == "combined":
+        mask_total = cv2.bitwise_or(create_mask_rgb(rgb, tol=tol),
+                                    create_mask_hsv(rgb))
+    else:
+        raise ValueError(f"Invalid method '{method}'. Use 'rgb', 'hsv' or 'combined'.")
+
+    # Clean small noise
+    mask_total = cv2.morphologyEx(mask_total, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
 
     # Step 1: Convert to float32 and normalize
-    mask_f = mask.astype(np.float32) / 255.0
+    mask_f = mask_total.astype(np.float32) / 255.0
 
     # Step 2: Upscale to simulate subpixels
     if upscale_factor > 1:
-        mask_f = cv2.resize(mask_f, None, fx=upscale_factor, fy=upscale_factor, interpolation=cv2.INTER_CUBIC)
+        mask_f = cv2.resize(mask_f, None, fx=upscale_factor, fy=upscale_factor,
+                            interpolation=cv2.INTER_CUBIC)
 
     # Step 3: Apply Gaussian blur to generate soft edges
     mask_f = cv2.GaussianBlur(mask_f, (0, 0), sigmaX=blur_sigma, sigmaY=blur_sigma)
@@ -183,12 +238,6 @@ def detect_areas(rgb: np.ndarray, transform, points=False, upscale_factor=4, blu
 
     # Step 5: Convert back to uint8 for contour detection
     mask_uint8 = (mask_thresh * 255).astype(np.uint8)
-
-    if points:
-        ys, xs = np.where(mask_uint8 > 0)
-        adjusted_transform = transform * transform.scale(1 / upscale_factor, 1 / upscale_factor)
-        geo_coords = [xy(adjusted_transform, y, x, offset='center') for y, x in zip(ys, xs)]
-        return geo_coords
 
     # Step 6: Get contours from smooth mask
     contours, _ = cv2.findContours(mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
