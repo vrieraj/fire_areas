@@ -23,6 +23,17 @@ def generate_datetimes(start, end, step_minutes):
 ## BBOX -> GRID ##
 
 def compute_grid_for_bbox(bbox: tuple, pixel_size_m: float = 500.0, base_px: int = 500):
+    """
+    Divide a bounding box into rows and columns based on pixel resolution.
+
+    Args:
+        bbox (tuple): (lon_min, lat_min, lon_max, lat_max).
+        pixel_size_m (float): target pixel resolution in meters (default=500).
+        base_px (int): base image size in pixels (default=500).
+
+    Returns:
+        (n_rows, n_cols): number of subdivisions in vertical and horizontal direction.
+    """
     lon_min, lat_min, lon_max, lat_max = bbox
     geod = Geod(ellps="WGS84")
 
@@ -61,7 +72,6 @@ def calculate_image_size(bbox:tuple, pixel_size_m:float=500.0):
 
     Parameters:
     bbox (tuple): bounding box of the area of interest in format (lon_min, lat_min, lon_max, lat_max)
-    base_size (int): width of the WMS image in pixels (default 300)
 
     Returns:
     tuple: (width, height) in pixels.
@@ -189,7 +199,6 @@ def create_mask_hsv(rgb: np.ndarray) -> np.ndarray:
 
     return mask_hsv
 
-
 def detect_areas(rgb: np.ndarray, transform, method: str = "hsv",
                  upscale_factor=4, blur_sigma=3.0, threshold_value=0.7, tol: int = 40):
     """
@@ -206,7 +215,7 @@ def detect_areas(rgb: np.ndarray, transform, method: str = "hsv",
 
     Returns:
         contours (List[np.ndarray]): OpenCV contours [(N,1,2)] in geographic coordinates.
-        adjusted_transform (Affine): Transform adjusted for upscaling.
+        adjusted_transform: Transform adjusted for upscaling.
     """
     # --- Choose mask type ---
     if method == "rgb":
@@ -225,10 +234,13 @@ def detect_areas(rgb: np.ndarray, transform, method: str = "hsv",
     # Step 1: Convert to float32 and normalize
     mask_f = mask_total.astype(np.float32) / 255.0
 
-    # Step 2: Upscale to simulate subpixels
+    # Step 2: Upscale to simulate subpixels and adjust transform
     if upscale_factor > 1:
         mask_f = cv2.resize(mask_f, None, fx=upscale_factor, fy=upscale_factor,
                             interpolation=cv2.INTER_CUBIC)
+        adjusted_transform = transform * transform.scale(1 / upscale_factor, 1 / upscale_factor)
+    else:
+        adjusted_transform = transform
 
     # Step 3: Apply Gaussian blur to generate soft edges
     mask_f = cv2.GaussianBlur(mask_f, (0, 0), sigmaX=blur_sigma, sigmaY=blur_sigma)
@@ -241,10 +253,7 @@ def detect_areas(rgb: np.ndarray, transform, method: str = "hsv",
 
     # Step 6: Get contours from smooth mask
     contours, _ = cv2.findContours(mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-
-    # Step 7: Adjust transform for upscaled image
-    adjusted_transform = transform * transform.scale(1 / upscale_factor, 1 / upscale_factor)
-
+    
     return contours, adjusted_transform
 
 def calculate_polygon_areas(contours, transform, min_area_ha:float=1.0, simplify_tolerance:float=0.001):
