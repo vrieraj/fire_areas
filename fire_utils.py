@@ -1,3 +1,4 @@
+from affine import Affine
 import cv2
 from datetime import timedelta
 import geopandas as gpd
@@ -238,7 +239,7 @@ def detect_areas(rgb: np.ndarray, transform, method: str = "hsv",
     if upscale_factor > 1:
         mask_f = cv2.resize(mask_f, None, fx=upscale_factor, fy=upscale_factor,
                             interpolation=cv2.INTER_CUBIC)
-        adjusted_transform = transform * transform.scale(1 / upscale_factor, 1 / upscale_factor)
+        adjusted_transform = transform * Affine.scale(1 / upscale_factor, 1 / upscale_factor)
     else:
         adjusted_transform = transform
 
