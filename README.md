@@ -1,12 +1,10 @@
 # Wildfire Monitoring using EUMETSAT WMS Images
 
-🔥 This project provides scripts to monitor wildfires by downloading and processing WMS images from EUMETSAT. It detects burned areas, converts them into polygons, and updates a shapefile to track their temporal evolution.
+🔥🗺️ This project provides tools to monitor wildfires using Fire Temperature RGB satellite images from EUMETSAT WMS.
 
----
+The detection process includes options for RGB, HSV, or combined masks, Gaussian blurring for soft boundaries, and optional upscaling to simulate subpixel resolution. Detected burned areas are converted into polygons that can be integrated into GIS workflows for mapping and analysis.
 
-## Overview
-
-The main script downloads satellite imagery from the EUMETSAT Web Map Service (WMS) and processes the data to identify and map wildfire-affected areas. This tool is designed to be integrated into GIS software workflows for wildfire monitoring and analysis.
+The repository includes a Jupyter Notebook for quick testing, as well as scripts to run the detection directly in QGIS and to install required dependencies for QGIS integration.
 
 ---
 
@@ -52,13 +50,13 @@ QGIS_WFMonitoring.py
 2. Load the script file `QGIS_WFMonitoring.py` directly into the console (menu → “Open Script…” or drag-and-drop).  
 3. Press the **▶️ Run Script** button in the console.  
 
-A custom window will appear with:
+4. A custom window will appear with:
 - Current canvas extent (lon/lat).  
 - Date/time selectors.  
-- Output folder selector.  
-- Buttons: **About**, **Custom**, and **Run**.  
+- Output folder selector.
+- 'Advanced' options for tunning parameters.
+- Buttons: **About** and **Run**.  
 
-4. Customize parameters if needed (under *Custom*), or simply run with defaults.  
 5. After execution, results are automatically added to the QGIS map (TOC).
 
 💡 You can also add the [EUMETSAT WMS directly in QGIS](https://user.eumetsat.int/resources/user-guides/eumet-view-web-map-service-access-through-qgis)
