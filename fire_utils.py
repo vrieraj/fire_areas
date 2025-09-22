@@ -201,7 +201,7 @@ def create_mask_hsv(rgb: np.ndarray) -> np.ndarray:
     return mask_hsv
 
 def detect_areas(rgb: np.ndarray, transform, method: str = "hsv",
-                 upscale_factor=4, blur_sigma=3.0, threshold_value=0.7, tol: int = 40):
+                 upscale_factor=4, blur_sigma=3.0, threshold_value=0.8, tol: int = 40):
     """
     Detect fire areas from an RGB image using RGB, HSV, or combined masks.
 
@@ -211,7 +211,7 @@ def detect_areas(rgb: np.ndarray, transform, method: str = "hsv",
         method (str): 'rgb', 'hsv' (default), or 'combined'.
         upscale_factor (int): Scaling factor to simulate subpixel resolution (default=4).
         blur_sigma (float): Sigma value for Gaussian blur (default=3.0).
-        threshold_value (float): Threshold value (0–1) for the blurred mask (default=0.7).
+        threshold_value (float): Threshold value (0–1) for the blurred mask (default=0.8).
         tol (int): RGB tolerance (default=40, only for method='rgb' or 'combined').
 
     Returns:
@@ -336,7 +336,7 @@ def create_shapefile(new_gdf:gpd.GeoDataFrame, shapefile_path:str):
     new_gdf["time_area"] = new_gdf["area"].round(2)
     new_gdf["acc_area"] = new_gdf["area"].round(2)
     new_gdf.to_file(shapefile_path)
-    print(f"📁 Shapefile creado: {shapefile_path}")
+    print(f"📁 Shapefile create: {shapefile_path}")
 
 def update_shapefile(new_gdf:gpd.GeoDataFrame, shapefile_path:str):
     """
